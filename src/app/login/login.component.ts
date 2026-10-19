@@ -3,7 +3,9 @@ import { Component } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import axios from 'axios';
-import merge from 'lodash/merge';
+import { LoginPreferences, LoginRequest, LoginResponse } from '../models/auth';
+import { getErrorMessage } from '../utils/error-message';
+import { SessionService } from '../services/session.service';
 
 @Component({
   selector: 'app-login',
@@ -13,19 +15,14 @@ import merge from 'lodash/merge';
   styleUrl: './login.component.css'
 })
 export class LoginComponent {
-  username: any = '';
-  password: any = '';
-  busy: any = false;
-  message: any = '';
-  preferences: any = { theme: 'light', showTips: true, compact: false };
+  username = '';
+  password = '';
+  busy = false;
+  message = '';
+  preferences: LoginPreferences = { theme: 'light', showTips: true, compact: false };
 
-  constructor(private router: Router) {
-    try {
-      const saved = JSON.parse(localStorage.getItem('workshop_preferences') || '{}');
-      this.preferences = merge(this.preferences, saved);
-    } catch (error) {
-      console.log('Preferences could not be loaded', error);
-    }
+  constructor(private router: Router, private session: SessionService) {
+    this.preferences = this.session.getPreferences();
   }
 
   async login(): Promise<void> {
@@ -38,21 +35,24 @@ export class LoginComponent {
       } else {
         this.busy = true;
         try {
-          const response: any = await axios.post(
+          const request: LoginRequest = {
+            username: this.username,
+            password: this.password,
+            client: 'angular-workshop'
+          };
+          const response = await axios.post<LoginResponse>(
             'http://localhost:8080/auth/login',
-            { username: this.username, password: this.password, client: 'angular-workshop' },
+            request,
             { timeout: 5000 }
           );
           if (response && response.data && response.data.token) {
-            localStorage.setItem('workshop_token', response.data.token);
-            localStorage.setItem('workshop_user', JSON.stringify(response.data.user));
-            localStorage.setItem('workshop_preferences', JSON.stringify(this.preferences));
+            this.session.saveSession(response.data.token, response.data.user, this.preferences);
             await this.router.navigate(['/dashboard']);
           } else {
             this.message = '<strong>El backend respondió sin token.</strong>';
           }
-        } catch (error: any) {
-          const backendMessage = error?.response?.data?.message || error?.message || 'Error desconocido';
+        } catch (error: unknown) {
+          const backendMessage = getErrorMessage(error, 'message', 'Error desconocido');
           this.message = '<strong>No se pudo autenticar a ' + this.username + '.</strong><br>' + backendMessage;
           console.error(error);
         } finally {

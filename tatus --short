@@ -1,0 +1,168 @@
+[1mdiff --git a/src/app/dashboard/dashboard.component.ts b/src/app/dashboard/dashboard.component.ts[m
+[1mindex 9bdf3bd..75c8835 100644[m
+[1m--- a/src/app/dashboard/dashboard.component.ts[m
+[1m+++ b/src/app/dashboard/dashboard.component.ts[m
+[36m@@ -2,6 +2,10 @@[m [mimport { CommonModule } from '@angular/common';[m
+ import { ChangeDetectorRef, Component, NgZone, OnInit } from '@angular/core';[m
+ import { Router } from '@angular/router';[m
+ import axios from 'axios';[m
+[32m+[m[32mimport { UserProfile } from '../models/auth';[m
+[32m+[m[32mimport { SessionService } from '../services/session.service';[m
+[32m+[m[32mimport { Task } from '../models/task';[m
+[32m+[m[32mimport { getErrorMessage } from '../utils/error-message';[m
+ import { formatTaskLabel } from '../utils/legacy-format';[m
+ [m
+ const STATUS_LABELS: Record<string, string> = {[m
+[36m@@ -20,38 +24,46 @@[m [mconst STATUS_LABELS: Record<string, string> = {[m
+   styleUrl: './dashboard.component.css'[m
+ })[m
+ export class DashboardComponent implements OnInit {[m
+[31m-  tasks: any[] = [];[m
+[31m-  visibleTasks: any[] = [];[m
+[31m-  user: any = {};[m
+[31m-  loading: any = true;[m
+[31m-  error: any = '';[m
+[32m+[m[32m  tasks: Task[] = [];[m
+[32m+[m[32m  visibleTasks: Task[] = [];[m
+[32m+[m[32m  user: UserProfile = {};[m
+[32m+[m[32m  loading = true;[m
+[32m+[m[32m  error = '';[m
+ [m
+[31m-  constructor(private router: Router, private cdr: ChangeDetectorRef, private zone: NgZone) {}[m
+[32m+[m[32m  constructor([m
+[32m+[m[32m    private router: Router,[m
+[32m+[m[32m    private cdr: ChangeDetectorRef,[m
+[32m+[m[32m    private zone: NgZone,[m
+[32m+[m[32m    private session: SessionService[m
+[32m+[m[32m  ) {}[m
+ [m
+   statusLabel(status: string): string {[m
+     return STATUS_LABELS[(status || '').toUpperCase()] || status;[m
+   }[m
+ [m
+   async ngOnInit(): Promise<void> {[m
+[31m-    const token = localStorage.getItem('workshop_token');[m
+[31m-    this.user = JSON.parse(localStorage.getItem('workshop_user') || '{}');[m
+[32m+[m[32m    const token = this.session.getToken();[m
+[32m+[m[32m    this.user = this.session.getUser();[m
+     if (!token) {[m
+       await this.router.navigate(['/login']);[m
+       return;[m
+     }[m
+     try {[m
+[31m-      const response: any = await axios.get('http://localhost:8000/api/tasks?owner=' + (this.user.username || ''), {[m
+[32m+[m[32m      const response = await axios.get<Task[]>([m
+[32m+[m[32m        'http://localhost:8000/api/tasks?owner=' + String(this.user.username || ''),[m
+[32m+[m[32m        {[m
+         headers: { Authorization: 'Bearer ' + token }[m
+[31m-      });[m
+[32m+[m[32m        }[m
+[32m+[m[32m      );[m
+       const tasks = response.data;[m
+[31m-      const tmp: any[] = [];[m
+[32m+[m[32m      const tmp: Task[] = [];[m
+       for (let i = 0; i < tasks.length; i++) {[m
+         if (tasks[i].status !== 'ARCHIVED') {[m
+           tasks[i].label = formatTaskLabel(tasks[i]);[m
+           tmp.push(tasks[i]);[m
+         }[m
+       }[m
+[31m-      tmp.sort((a: any, b: any) => a.priority > b.priority ? -1 : 1);[m
+[32m+[m[32m      tmp.sort((a, b) => a.priority > b.priority ? -1 : 1);[m
+       // axios resuelve a veces fuera de la zona de Angular (más aún llegando[m
+       // por navegación desde el login): forzamos volver a entrar a la zona[m
+       // y disparamos detectChanges a mano para no depender de que Angular[m
+[36m@@ -62,9 +74,9 @@[m [mexport class DashboardComponent implements OnInit {[m
+         this.loading = false;[m
+         this.cdr.detectChanges();[m
+       });[m
+[31m-    } catch (error: any) {[m
+[32m+[m[32m    } catch (error: unknown) {[m
+       this.zone.run(() => {[m
+[31m-        this.error = error?.response?.data?.detail || error?.message || 'No se pudo cargar el dashboard';[m
+[32m+[m[32m        this.error = getErrorMessage(error, 'detail', 'No se pudo cargar el dashboard');[m
+         this.loading = false;[m
+         this.cdr.detectChanges();[m
+       });[m
+[36m@@ -72,8 +84,7 @@[m [mexport class DashboardComponent implements OnInit {[m
+   }[m
+ [m
+   async logout(): Promise<void> {[m
+[31m-    localStorage.removeItem('workshop_token');[m
+[31m-    localStorage.removeItem('workshop_user');[m
+[32m+[m[32m    this.session.clearSession();[m
+     await this.router.navigate(['/login']);[m
+   }[m
+ }[m
+[1mdiff --git a/src/app/login/login.component.ts b/src/app/login/login.component.ts[m
+[1mindex b7cc137..a587b98 100644[m
+[1m--- a/src/app/login/login.component.ts[m
+[1m+++ b/src/app/login/login.component.ts[m
+[36m@@ -3,7 +3,9 @@[m [mimport { Component } from '@angular/core';[m
+ import { FormsModule } from '@angular/forms';[m
+ import { Router } from '@angular/router';[m
+ import axios from 'axios';[m
+[31m-import merge from 'lodash/merge';[m
+[32m+[m[32mimport { LoginPreferences, LoginRequest, LoginResponse } from '../models/auth';[m
+[32m+[m[32mimport { getErrorMessage } from '../utils/error-message';[m
+[32m+[m[32mimport { SessionService } from '../services/session.service';[m
+ [m
+ @Component({[m
+   selector: 'app-login',[m
+[36m@@ -13,19 +15,14 @@[m [mimport merge from 'lodash/merge';[m
+   styleUrl: './login.component.css'[m
+ })[m
+ export class LoginComponent {[m
+[31m-  username: any = '';[m
+[31m-  password: any = '';[m
+[31m-  busy: any = false;[m
+[31m-  message: any = '';[m
+[31m-  preferences: any = { theme: 'light', showTips: true, compact: false };[m
+[32m+[m[32m  username = '';[m
+[32m+[m[32m  password = '';[m
+[32m+[m[32m  busy = false;[m
+[32m+[m[32m  message = '';[m
+[32m+[m[32m  preferences: LoginPreferences = { theme: 'light', showTips: true, compact: false };[m
+ [m
+[31m-  constructor(private router: Router) {[m
+[31m-    try {[m
+[31m-      const saved = JSON.parse(localStorage.getItem('workshop_preferences') || '{}');[m
+[31m-      this.preferences = merge(this.preferences, saved);[m
+[31m-    } catch (error) {[m
+[31m-      console.log('Preferences could not be loaded', error);[m
+[31m-    }[m
+[32m+[m[32m  constructor(private router: Router, private session: SessionService) {[m
+[32m+[m[32m    this.preferences = this.session.getPreferences();[m
+   }[m
+ [m
+   async login(): Promise<void> {[m
+[36m@@ -38,21 +35,24 @@[m [mexport class LoginComponent {[m
+       } else {[m
+         this.busy = true;[m
+         try {[m
+[31m-          const response: any = await axios.post([m
+[32m+[m[32m          const request: LoginRequest = {[m
+[32m+[m[32m            username: this.username,[m
+[32m+[m[32m            password: this.password,[m
+[32m+[m[32m            client: 'angular-workshop'[m
+[32m+[m[32m          };[m
+[32m+[m[32m          const response = await axios.post<LoginResponse>([m
+             'http://localhost:8080/auth/login',[m
+[31m-            { username: this.username, password: this.password, client: 'angular-workshop' },[m
+[32m+[m[32m            request,[m
+             { timeout: 5000 }[m
+           );[m
+           if (response && response.data && response.data.token) {[m
+[31m-            localStorage.setItem('workshop_token', response.data.token);[m
+[31m-            localStorage.setItem('workshop_user', JSON.stringify(response.data.user));[m
+[31m-            localStorage.setItem('workshop_preferences', JSON.stringify(this.preferences));[m
+[32m+[m[32m            this.session.saveSession(response.data.token, response.data.user, this.preferences);[m
+             await this.router.navigate(['/dashboard']);[m
+           } else {[m
+             this.message = '<strong>El backend respondió sin token.</strong>';[m
+           }[m
+[31m-        } catch (error: any) {[m
+[31m-          const backendMessage = error?.response?.data?.message || error?.message || 'Error desconocido';[m
+[32m+[m[32m        } catch (error: unknown) {[m
+[32m+[m[32m          const backendMessage = getErrorMessage(error, 'message', 'Error desconocido');[m
+           this.message = '<strong>No se pudo autenticar a ' + this.username + '.</
